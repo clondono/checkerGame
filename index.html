@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+
+<!--
+  COLLABORATORS:
+  Angel Batista
+  
+  external js files: 
+  external_js/jquery-animate-css-rotate-scale.js
+  "http://code.jquery.com/ui/1.10.2/jquery-ui.js"
+  "http://code.jquery.com/jquery-1.9.1.js"
+  "http://code.jquery.com/ui/1.10.2/themes/smoothness/jquery-ui.css"
+
+-->
+<html>
+
+<head>
+<meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
+<title>Checkerboard</title>
+
+<!-- Load style sheets -->
+<link rel="stylesheet" type="text/css" href="mainLayout.css" />
+<link rel="stylesheet" href="http://code.jquery.com/ui/1.10.2/themes/smoothness/jquery-ui.css" />
+
+<!-- Load any supplemental Javascript libraries here -->
+<script type="text/javascript" src="external_js/jquery-1.9.0.min.js"></script>
+<!--<script type="text/javascript" src="external_js/jquery-animate-css-rotate-scale.js"></script>
+-->
+<script type="text/javascript" src="checker.js"></script>
+<script type="text/javascript" src="boardEvent.js"></script>
+<script type="text/javascript" src="board.js"></script>
+<script type="text/javascript" src="rules.js"></script>
+<script src="http://code.jquery.com/jquery-1.9.1.js"></script>
+<script src="http://code.jquery.com/ui/1.10.2/jquery-ui.js"></script>
+
+
+<script type="text/javascript">
+
+//This script extracts parameters from the URL
+//from jquery-howto.blogspot.com
+
+    $.extend({
+        getUrlVars : function() {
+            var vars = [], hash;
+            var hashes = window.location.href.slice(
+                    window.location.href.indexOf('?') + 1).split('&');
+            for ( var i = 0; i < hashes.length; i++) {
+                hash = hashes[i].split('=');
+                vars.push(hash[0]);
+                vars[hash[0]] = hash[1];
+            }
+            return vars;
+        },
+        getUrlVar : function(name) {
+            return $.getUrlVars()[name];
+        }
+    });
+
+    var DEFAULT_BOARD_SIZE = 8;
+
+    //data model
+    var board;
+    var rules;
+    var whoseTurn = "black";
+    var dragging = false;	
+    var draggee = null;
+    
+    var undoQueue=[];
+    var undoCount=0;
+    var redoQueue=[];
+    var redoCount=0;
+
+
+    var directionOf = function(color) {
+      if (color == "black") {
+        return -1;
+      }
+      return 1;
+    }
+
+    // Fill in this function to toggle the display for whose turn
+    // The color parameter should be either "black" or "red"
+    var toggleTurn = function(color) {
+	// Your code here
+	var turn=$("#Turn");
+	$(turn).toggleClass('black-turn');
+	$(turn).toggleClass('red-turn');
+	//window.setTimeout(function(){
+		if(color=='black'){
+		whoseTurn='red';
+		
+		///$("#pieces").rotate(180);
+		//$("#arrows").rotate(180);
+		//$("#canvas").rotate(180);
+		//$("#animation").rotate(180);
+	}
+	else{
+		whoseTurn='black'
+		//$("#pieces").rotate(0);
+		//$("#arrows").rotate(0);
+		//$("#canvas").rotate(0);
+		//$("#animation").rotate(0);		
+	}
+	$("#btnAutoMove").removeAttr("disabled");
+	$(turn).html(whoseTurn+" turn");
+
+	//},300);
+    }
+
+
+
+    // This allows the Javascript code inside this block to only run when the page
+    // has finished loading in the browser.
+    $(document).ready(function() {
+
+        if ($.getUrlVar('size') && $.getUrlVar('size') >= 6) {
+            board = new Board($.getUrlVar('size'));
+        } else {
+            board = new Board(DEFAULT_BOARD_SIZE);
+        }
+
+
+	rules = new Rules(board);
+
+		var canvas =document.getElementById('canvas');
+		var ctx=canvas.getContext('2d');
+     	var boxes=board.size();
+     	var squareLen=400/boxes;
+		var x=0;
+		
+		var y =0;		
+		for (var a=0; a<boxes; a++){
+				y=a*squareLen;
+				var row=document.createElement("tr");
+				$(row).css('height',squareLen-2);
+				$(row).css('width',"400px");
+
+				$(row).addClass("tdy");
+
+			for(var b=0;b<boxes;b=b+2){
+				var cell=document.createElement("td");
+				var cell2=document.createElement("td");
+				$(cell).css('width',squareLen-2);
+				$(cell2).css('width',squareLen-2);
+
+				if( a%2==0){
+					x=b*squareLen;	
+				}
+				else{
+					x=(b+1)*squareLen;
+				}	
+				ctx.fillStyle = "rgb(256,256,256)";
+				ctx.fillRect(x,y,squareLen,squareLen);
+				$(cell).addClass("tdy");
+				$(cell2).addClass("tdy");
+				row.appendChild(cell);
+				row.appendChild(cell2);
+			}	
+			$('#pieces').append(row);
+		}
+		
+
+		
+		var whichPiece=function(checkPiece){
+			
+			var check=checkPiece;
+			var img=document.createElement('img');
+			
+			if (check.color=='red'){
+				if(check.isKing){$(img).attr('src','graphics/red-king.png');}
+				else{$(img).attr('src','graphics/red-piece.png');}				
+				
+			}
+			else{
+				if(check.isKing){$(img).attr('src','graphics/black-king.png');}
+				else{$(img).attr('src','graphics/black-piece.png');}
+			}
+			$(img).css('width',squareLen*.75);
+			$(img).css('height',squareLen*.75);
+			$(img).addClass('imgy');
+			$(img).draggable({ zIndex:100 });
+			return img
+			
+		};		
+
+
+
+		//Draggable
+		var draggable=document.getElementById("mainTable");
+
+		draggable.addEventListener('mousedown',function (e) {					
+			var downX=e.clientX-155;
+			var downY=e.clientY-11;
+
+
+			var rowD=Math.floor(downY/squareLen);
+			var colD=Math.floor(downX/squareLen);
+
+
+			if(board.getCheckerAt(rowD,colD)){
+				dragging=true;
+				var check=board.getCheckerAt(rowD,colD);
+				dragee=check;
+			}
+		},true);
+
+		window.addEventListener('mouseup',function (e) {		
+			var turnD=1;
+			var playerD=1;
+
+
+			var upX=e.clientX-155;
+			var upY=e.clientY-11;
+
+			var rowD=Math.floor(upY/squareLen);
+			var colD=Math.floor(upX/squareLen);
+
+			if (dragging){
+				/*
+				if legal
+				do it
+			*/	
+				if(whoseTurn=='black'){
+					turnD=-1;
+				}
+				if(dragee.color=='black'){
+					playerD=-1;
+				}
+			
+				if(board.isValidLocation(rowD,colD)){
+ 						var results=rules.makeMove(dragee, turnD,playerD,rowD,colD)
+					
+					if(results==null){
+						board.remove(dragee);
+						board.add(dragee,dragee.row,dragee.col);
+					}
+					else{
+						undoQueue[undoCount]=results;
+						undoCount=undoCount+1;
+						redoCount=0;
+						$("#btnUndo").removeAttr("disabled");
+						$("#btnRedo").attr("disabled","disabled");
+					}
+				}
+				else{
+						board.remove(dragee);
+						board.add(dragee,dragee.row,dragee.col);
+				}
+			}
+
+			dragee=null;
+			dragging=false;
+		},true);
+
+
+
+
+        board.addEventListener('add',function (e) {
+    		var dets=e.details;    	
+    		var rows=$("#pieces").children().children();
+    		$(rows[dets.row].children[dets.col]).append(whichPiece(dets.checker)); 
+    	},true);
+
+    	board.addEventListener('move',function (e) {
+
+    		var dets=e.details;
+			var rows=$("#pieces").children().children();
+			var mover= $(rows[dets.fromRow].children[dets.fromCol]).children().clone(); 
+			$(rows[dets.fromRow].children[dets.fromCol]).children().remove();
+
+			if(dragging==false){
+			// animation
+			mover.css('width',squareLen*.75);
+			mover.css('height',squareLen*.75);
+			
+			mover.addClass('movee');
+			var divCont=document.createElement("div");
+			$(divCont).addClass('divCont');
+			$(divCont).prepend(mover);
+			$("#animation").prepend(divCont);
+			$(divCont).css('position',"absolute");
+
+			$(mover).css('position',"absolute");
+			$(mover).css('top',((dets.fromRow+.1)*squareLen)+"px");
+			$(mover).css('left',((dets.fromCol+.1)*squareLen)+"px");
+			var xDif=((dets.fromCol-dets.toCol)*squareLen);
+			var yDif=((dets.fromRow-dets.toRow)*squareLen);
+			var op="-=";
+			
+			//animation!!!
+			$("#btnAutoMove").attr("disabled","disabled");			
+			$(divCont).animate({'left':op+xDif+"px",'top':op+yDif+"px"},300, function(){
+			$(rows[dets.toRow].children[dets.toCol]).append(whichPiece(dets.checker));			
+			$("#animation").children().remove();
+			
+			
+			//arrow
+			drawArrow(dets.fromRow,dets.fromCol,dets.toRow,dets.toCol);
+
+
+			toggleTurn(whoseTurn);
+});
+		}
+		else{
+			$(rows[dets.toRow].children[dets.toCol]).append(whichPiece(dets.checker));			
+			$("#animation").children().remove();
+			
+			
+			//arrow
+			drawArrow(dets.fromRow,dets.fromCol,dets.toRow,dets.toCol);
+
+
+			toggleTurn(whoseTurn);
+		}
+			},true);
+
+		var drawArrow= function(fromRow,fromCol,toRow,toCol){
+
+
+			var arrow =document.getElementById('arrows');
+			var arrowCtx=arrow.getContext('2d');
+			arrowCtx.clearRect(0,0,arrow.width,arrow.height);
+
+			var x1=(fromCol+.5)*squareLen;
+			var x2=(toCol+.5)*squareLen;
+			var y1=(fromRow+.5)*squareLen;
+			var y2=(toRow+.5)*squareLen;
+			
+			//line
+			arrowCtx.beginPath();
+  			arrowCtx.moveTo(x1,y1);
+  			arrowCtx.lineTo(x2,y2);
+  			arrowCtx.strokeStyle = "Yellow"
+  			arrowCtx.stroke();
+  			arrowCtx.closePath();
+  			
+  			//triangle
+  			arrowCtx.beginPath();
+  			arrowCtx.fillStyle = "Yellow"
+
+  			if (x1<x2){
+  				if(y1<y2){
+  					//x1<x2  y1<y2
+  					//DONE!!!
+  					arrowCtx.moveTo(x2-.05*squareLen,y2-.15*squareLen);
+					arrowCtx.lineTo(x2,y2);
+					arrowCtx.lineTo(x2-.15*squareLen,y2-.05*squareLen);
+  				}
+  				else{
+  					if(y1>y2){
+  						//x1<x2  y1>y2
+  						arrowCtx.moveTo(x2-.15*squareLen,y2+.05*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2-.05*squareLen,y2+.15*squareLen);
+					
+  					}
+  					else{
+  						//x1<x2  y1=y2
+  						arrowCtx.moveTo(x2-.1*squareLen,y2-.05*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2-.1*squareLen,y2+.05*squareLen);
+  					}
+  				}
+  			}
+  			else{
+  				if (x1>x2){
+	  				if(y1<y2){
+  						//x1>x2  y1<y2
+
+  						arrowCtx.moveTo(x2+.05*squareLen,y2-.15*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2+.15*squareLen,y2-.05*squareLen);
+	  				}
+  					else{
+						if(y1>y2){
+  						arrowCtx.moveTo(x2+.05*squareLen,y2+.15*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2+.15*squareLen,y2+.05*squareLen);
+  						}
+  						else{
+  							//y1=y2
+  						arrowCtx.moveTo(x2+.1*squareLen,y2+.05*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2+.1*squareLen,y2-.05*squareLen);
+  						}
+  					}
+  				}
+  				else{
+  					//x1=x2
+  					if(y1<y2){
+  						//x1>x2  y1<y2
+
+  						arrowCtx.moveTo(x2+.05*squareLen,y2-.1*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2-.05*squareLen,y2-.1*squareLen);
+	  				}
+  					else{
+  						//x1>x2  y1>y2
+						if(y1>y2){
+  						arrowCtx.moveTo(x2-.05*squareLen,y2+.1*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2+.05*squareLen,y2+.1*squareLen);
+  						}
+  						else{
+  							//y1=y2
+  							//CIRCLE
+  						arrowCtx.moveTo(x2*squareLen,y2+.15*squareLen);
+						arrowCtx.lineTo(x2,y2);
+						arrowCtx.lineTo(x2*squareLen,y2+.05*squareLen);
+  						}
+  					}
+  				}
+  			}
+
+			arrowCtx.fill();
+			arrowCtx.stroke();
+		};
+
+        board.addEventListener('remove', function(e) {
+    		var dets=e.details;    	
+			var rows=$("#pieces").children().children();
+			$(rows[dets.row].children[dets.col]).children().remove(); 
+        	
+        }, true);
+
+        board.addEventListener('promote',function (e) {
+    		var dets=e.details;    		
+   		
+    	},true);
+
+        
+        $("#btnUndo").click(function(evt){
+        	var reverse=undoQueue[undoCount-1];
+			var checker = board.getCheckerAt(reverse.to_row,reverse.to_col);
+
+			var details = {checker:checker, toRow:reverse.from_row, toCol:reverse.from_col, fromRow:checker.row, fromCol:checker.col};
+			undoCount=undoCount-1;
+			redoQueue[redoCount]=reverse;
+          	redoCount=redoCount+1;
+          	$("#btnRedo").removeAttr("disabled");
+			if (undoCount==0){
+				$("#btnUndo").attr("disabled","disabled");			
+        	}
+       		
+		   	if(reverse.made_king){
+        		checker.isKing=false;
+        	}
+        	for(var x=0; x<reverse.remove.length;x++){
+        		var check = reverse.remove[x]
+        		board.add(check,check.row,check.col);
+        	}
+        	board.moveTo(checker,reverse.from_row,reverse.from_col);
+
+        });
+
+        $("#btnRedo").click(function(evt){
+        	var reverse=redoQueue[redoCount-1];
+			var checker = board.getCheckerAt(reverse.from_row,reverse.from_col);
+
+			var details = {checker:checker, toRow:reverse.to_row, toCol:reverse.to_col, fromRow:checker.row, fromCol:checker.col};
+			undoCount=undoCount+1;
+			redoCount=redoCount-1;
+
+			$("#btnUndo").removeAttr("disabled");
+			if (redoCount==0){
+				$("#btnRedo").attr("disabled","disabled");			
+        	}
+        	if(reverse.made_king){
+        		checker.isKing=true;
+        	}
+        	for(var x=0; x<reverse.remove.length;x++){
+        		var check = reverse.remove[x]
+        		board.removeAt(check.row,check.col);
+
+        	}
+        	board.moveTo(checker,reverse.to_row,reverse.to_col);
+        });
+
+
+        $("#btnNewGame").click(function(evt) {
+        	//clear board
+			$("#pieces").children().children().children().children().remove();
+			var arrow =document.getElementById('arrows');
+			var arrowCtx=arrow.getContext('2d');
+			arrowCtx.clearRect(0,0,arrow.width,arrow.height);
+		    whoseTurn='black';
+            $("#Turn").addClass('black-turn');
+			$("#Turn").removeClass('red-turn');
+			$("#Turn").html(whoseTurn+" turn");
+			//$("#pieces").rotate(0);
+			//$("#arrows").rotate(0);
+			//$("#animation").rotate(0);	
+			undoQueue=[];
+    		undoCount=0;
+   			redoQueue=[];
+    		redoCount=0;
+			$("#btnRedo").attr("disabled","disabled");
+			$("#btnUndo").attr("disabled","disabled");
+
+            board.prepareNewGame();
+
+        });
+
+        $("#btnAutoMove").click(function(evt) {
+          	var playerColor = whoseTurn;
+          	var playerDirection = directionOf(playerColor);
+          	var result = rules.makeRandomMove(playerColor, playerDirection);
+          	undoQueue[undoCount]=result;
+          	undoCount=undoCount+1;
+          	redoCount=0;
+			$("#btnUndo").removeAttr("disabled");
+			$("#btnRedo").attr("disabled","disabled");
+
+
+          	if (result != null) {
+          	
+          	}
+        });
+
+        board.prepareNewGame();
+
+    });
+</script>
+
+
+</head>
+
+<body>
+
+<table id="mainTable">
+    <tr>
+        <td id="navigation">
+          <table id='test'>
+			  <tr><td id="Turn" class="black-turn">	black turn</td></tr>
+              <tr><td><input id="btnNewGame" type="button" name="new" value="New Game"/></td></tr>
+              <tr><td><input id="btnAutoMove" type="button" name="new" value="Auto Move"/></td></tr>
+              <tr><td><input id="btnUndo" type="button" name="new" value="Undo" disabled="disabled"/></td></tr>
+              <tr><td><input id="btnRedo" type="button" name="new" value="Redo" disabled="disabled"/></td></tr>
+
+            </table>
+        </td>
+
+        <td id="content" width = "400px" height ="400px">
+			<!-- Board -->	
+			<canvas id="canvas" width = "400px" height ="400px"> </canvas>
+			<table id="pieces"> 
+			</table>	
+			<canvas id="arrows"  width = "400px" height ="400px"> </canvas>
+			<div id="animation"  width = "400px" height ="400px"> </div>
+
+        </td>
+    </tr>
+
+   </table>
+
+</body>
+
+</html>
